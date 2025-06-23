@@ -9,164 +9,164 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-#define BUFFER_SIZE 1024
-#define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 8888
-#define MAX_RECORDS 1000
-#define RECORDS_PER_PAGE 20
-#define NICKNAME_SIZE 50
+#define DATA_BUFFER_SIZE 1024
+#define HUB_IP "127.0.0.1"
+#define HUB_PORT 9999
+#define MAX_LOG_ENTRIES 1000
+#define ENTRIES_PER_PAGE 20
+#define USERNAME_SIZE 50
 
-// Chat record structure
+// Communication log structure
 typedef struct {
     char timestamp[32];
-    char message_type[16];  // CHAT, PRIVATE, SYSTEM
-    char sender[NICKNAME_SIZE];
-    char receiver[NICKNAME_SIZE];  // For private messages
-    char content[BUFFER_SIZE];
-} ChatRecord;
+    char comm_type[16];  // BROADCAST, WHISPER, NOTIFICATION
+    char from_user[USERNAME_SIZE];
+    char to_user[USERNAME_SIZE];  // For private communications
+    char message_content[DATA_BUFFER_SIZE];
+} CommLog;
 
-SOCKET client_socket;
-int connected = 0;
-char nickname[NICKNAME_SIZE];
-ChatRecord chat_history[MAX_RECORDS];
-int record_count = 0;
-int current_page = 0;
+SOCKET hub_connection;
+int is_connected = 0;
+char username[USERNAME_SIZE];
+CommLog communication_log[MAX_LOG_ENTRIES];
+int log_entry_count = 0;
+int current_log_page = 0;
 
 // Function declarations
-int init_client();
-void connect_to_server();
-void send_message(const char* message);
-unsigned __stdcall receive_thread(void* param);
-void display_help();
-void cleanup_client();
-void save_chat_record(const char* type, const char* sender, const char* receiver, const char* content);
-void display_chat_history(int page);
-void export_chat_history();
-void parse_and_save_message(const char* buffer);
+int initialize_client();
+void connect_to_hub();
+void send_data(const char* data);
+unsigned __stdcall communication_thread(void* param);
+void show_help_menu();
+void cleanup_connection();
+void save_comm_log(const char* type, const char* from_user, const char* to_user, const char* content);
+void display_comm_history(int page);
+void export_comm_log();
+void parse_and_log_message(const char* buffer);
 
 int main() {
-    printf("=== Chat Client ===\n");
-    printf("Connecting to server %s:%d\n\n", SERVER_IP, SERVER_PORT);
+    printf("=== Communication Client ===\n");
+    printf("Connecting to hub %s:%d\n\n", HUB_IP, HUB_PORT);
     
-    if (init_client() != 0) {
-        printf("Failed to initialize client\n");
+    if (initialize_client() != 0) {
+        printf("Failed to initialize communication client\n");
         printf("Press any key to exit...");
         _getch();
         return 1;
     }
     
-    connect_to_server();
+    connect_to_hub();
     
-    if (!connected) {
-        printf("Failed to connect to server\n");
+    if (!is_connected) {
+        printf("Failed to connect to communication hub\n");
         printf("Press any key to exit...");
         _getch();
-        cleanup_client();
+        cleanup_connection();
         return 1;
     }
     
-    // Get nickname from user
-    printf("Enter your nickname: ");
-    fgets(nickname, sizeof(nickname), stdin);
-    nickname[strcspn(nickname, "\n")] = 0; // Remove newline
+    // Get username from user
+    printf("Enter your username: ");
+    fgets(username, sizeof(username), stdin);
+    username[strcspn(username, "\n")] = 0; // Remove newline
     
-    // Wait for server registration prompt (nickname will be sent automatically)
+    // Wait for hub authentication prompt (username will be sent automatically)
     
-    // Start receive thread
-    HANDLE receive_handle = (HANDLE)_beginthreadex(NULL, 0, receive_thread, NULL, 0, NULL);
+    // Start communication thread
+    HANDLE comm_handle = (HANDLE)_beginthreadex(NULL, 0, communication_thread, NULL, 0, NULL);
     
-    printf("\n=== Connected to Chat Server ===\n");
-    printf("Commands:\n");
-    printf("  /help - Show help\n");
-    printf("  /users - Show online users\n");
-    printf("  /private <nickname> <message> - Send private message\n");
-    printf("  /history [page] - View chat history\n");
-    printf("  /export - Export chat history to file\n");
-    printf("  /quit - Quit chat\n");
-    printf("  Just type to send public message\n");
-    printf("================================\n\n");
+    printf("\n=== Connected to Communication Hub ===\n");
+    printf("Available Commands:\n");
+    printf("  /help - Show command help\n");
+    printf("  /users - List connected clients\n");
+    printf("  /whisper <username> <message> - Send private message\n");
+    printf("  /log [page] - View communication log\n");
+    printf("  /export - Export communication log to file\n");
+    printf("  /exit - Disconnect from hub\n");
+    printf("  Just type to broadcast public message\n");
+    printf("======================================\n\n");
     
-    char input[BUFFER_SIZE];
-    while (connected) {
+    char user_input[DATA_BUFFER_SIZE];
+    while (is_connected) {
         printf("> ");
-        if (fgets(input, sizeof(input), stdin) != NULL) {
-            input[strcspn(input, "\n")] = 0; // Remove newline
+        if (fgets(user_input, sizeof(user_input), stdin) != NULL) {
+            user_input[strcspn(user_input, "\n")] = 0; // Remove newline
             
-            if (strlen(input) == 0) {
+            if (strlen(user_input) == 0) {
                 continue;
             }
             
-            if (strcmp(input, "/quit") == 0) {
+            if (strcmp(user_input, "/exit") == 0) {
                 break;
-            } else if (strcmp(input, "/help") == 0) {
-                display_help();
-            } else if (strcmp(input, "/users") == 0) {
-                send_message("USERS");
-            } else if (strcmp(input, "/history") == 0) {
-                display_chat_history(0);
-                current_page = 0;
-            } else if (strncmp(input, "/history ", 9) == 0) {
-                int page = atoi(input + 9) - 1;
+            } else if (strcmp(user_input, "/help") == 0) {
+                show_help_menu();
+            } else if (strcmp(user_input, "/users") == 0) {
+                send_data("USERS");
+            } else if (strcmp(user_input, "/log") == 0) {
+                display_comm_history(0);
+                current_log_page = 0;
+            } else if (strncmp(user_input, "/log ", 5) == 0) {
+                int page = atoi(user_input + 5) - 1;
                 if (page < 0) page = 0;
-                display_chat_history(page);
-                current_page = page;
-            } else if (strcmp(input, "/export") == 0) {
-                export_chat_history();
-            } else if (strcmp(input, "/next") == 0) {
-                display_chat_history(++current_page);
-            } else if (strcmp(input, "/prev") == 0) {
-                 if (current_page > 0) {
-                     display_chat_history(--current_page);
+                display_comm_history(page);
+                current_log_page = page;
+            } else if (strcmp(user_input, "/export") == 0) {
+                export_comm_log();
+            } else if (strcmp(user_input, "/next") == 0) {
+                display_comm_history(++current_log_page);
+            } else if (strcmp(user_input, "/prev") == 0) {
+                 if (current_log_page > 0) {
+                     display_comm_history(--current_log_page);
                  } else {
                      printf("Already at first page\n");
                  }
-            } else if (strncmp(input, "/private ", 9) == 0) {
-                // Parse private message: /private nickname message
-                char* space_pos = strchr(input + 9, ' ');
+            } else if (strncmp(user_input, "/whisper ", 9) == 0) {
+                // Parse private message: /whisper username message
+                char* space_pos = strchr(user_input + 9, ' ');
                 if (space_pos != NULL) {
                     *space_pos = '\0';
-                    char private_msg[BUFFER_SIZE];
-                    sprintf_s(private_msg, BUFFER_SIZE, "PRIVATE:%s:%s", input + 9, space_pos + 1);
-                    send_message(private_msg);
-                    // Save sent private message to history
-                    save_chat_record("PRIVATE", nickname, input + 9, space_pos + 1);
+                    char whisper_msg[DATA_BUFFER_SIZE];
+                    sprintf_s(whisper_msg, DATA_BUFFER_SIZE, "PRIVATE:%s:%s", user_input + 9, space_pos + 1);
+                    send_data(whisper_msg);
+                    // Save sent private message to log
+                    save_comm_log("WHISPER", username, user_input + 9, space_pos + 1);
                 } else {
-                    printf("Usage: /private <nickname> <message>\n");
+                    printf("Usage: /whisper <username> <message>\n");
                 }
             } else {
-                // Regular chat message
-                char chat_msg[BUFFER_SIZE];
-                sprintf_s(chat_msg, BUFFER_SIZE, "CHAT:%s", input);
-                send_message(chat_msg);
-                // Save sent public message to history
-                save_chat_record("CHAT", nickname, NULL, input);
+                // Regular broadcast message
+                char broadcast_msg[DATA_BUFFER_SIZE];
+                sprintf_s(broadcast_msg, DATA_BUFFER_SIZE, "CHAT:%s", user_input);
+                send_data(broadcast_msg);
+                // Save sent public message to log
+                save_comm_log("BROADCAST", username, NULL, user_input);
             }
         }
     }
     
-    printf("\nDisconnecting...\n");
-    connected = 0;
+    printf("\nDisconnecting from hub...\n");
+    is_connected = 0;
     
-    if (receive_handle) {
-        WaitForSingleObject(receive_handle, 1000);
-        CloseHandle(receive_handle);
+    if (comm_handle) {
+        WaitForSingleObject(comm_handle, 1000);
+        CloseHandle(comm_handle);
     }
     
-    cleanup_client();
+    cleanup_connection();
     printf("Press any key to exit...");
     _getch();
     return 0;
 }
 
-int init_client() {
+int initialize_client() {
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        printf("WSAStartup failed\n");
+        printf("Network initialization failed\n");
         return 1;
     }
     
-    client_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (client_socket == INVALID_SOCKET) {
+    hub_connection = socket(AF_INET, SOCK_STREAM, 0);
+    if (hub_connection == INVALID_SOCKET) {
         printf("Socket creation failed\n");
         WSACleanup();
         return 1;
@@ -175,72 +175,72 @@ int init_client() {
     return 0;
 }
 
-void connect_to_server() {
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(SERVER_PORT);
+void connect_to_hub() {
+    struct sockaddr_in hub_addr;
+    hub_addr.sin_family = AF_INET;
+    hub_addr.sin_port = htons(HUB_PORT);
     
-    if (inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr) <= 0) {
-        printf("Invalid server address\n");
+    if (inet_pton(AF_INET, HUB_IP, &hub_addr.sin_addr) <= 0) {
+        printf("Invalid hub address\n");
         return;
     }
     
-    if (connect(client_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+    if (connect(hub_connection, (struct sockaddr*)&hub_addr, sizeof(hub_addr)) == SOCKET_ERROR) {
         printf("Connection failed. Error: %d\n", WSAGetLastError());
         return;
     }
     
-    connected = 1;
-    printf("Connected to server successfully!\n");
+    is_connected = 1;
+    printf("Connected to communication hub successfully!\n");
 }
 
-void send_message(const char* message) {
-    if (connected && strlen(message) > 0) {
-        int result = send(client_socket, message, strlen(message), 0);
+void send_data(const char* data) {
+    if (is_connected && strlen(data) > 0) {
+        int result = send(hub_connection, data, strlen(data), 0);
         if (result == SOCKET_ERROR) {
-            printf("Send failed. Error: %d\n", WSAGetLastError());
-            connected = 0;
+            printf("Data transmission failed. Error: %d\n", WSAGetLastError());
+            is_connected = 0;
         }
     }
 }
 
-unsigned __stdcall receive_thread(void* param) {
-    char buffer[BUFFER_SIZE];
+unsigned __stdcall communication_thread(void* param) {
+    char data_buffer[DATA_BUFFER_SIZE];
     int bytes_received;
     
-    while (connected) {
-        bytes_received = recv(client_socket, buffer, BUFFER_SIZE - 1, 0);
+    while (is_connected) {
+        bytes_received = recv(hub_connection, data_buffer, DATA_BUFFER_SIZE - 1, 0);
         
         if (bytes_received > 0) {
-            buffer[bytes_received] = '\0';
+            data_buffer[bytes_received] = '\0';
             
-            // Parse different message types
-            if (strncmp(buffer, "REGISTER:", 9) == 0) {
-                // Server is asking for registration, send nickname
-                printf("\n%s\n", buffer + 9);
-                send_message(nickname);
-            } else if (strncmp(buffer, "SYSTEM:", 7) == 0) {
-                printf("\n%s\n> ", buffer + 7);
-                save_chat_record("SYSTEM", "Server", NULL, buffer + 7);
-            } else if (strncmp(buffer, "CHAT:", 5) == 0) {
-                printf("\n%s\n> ", buffer + 5);
-                parse_and_save_message(buffer);
-            } else if (strncmp(buffer, "PRIVATE:", 8) == 0) {
-                printf("\n%s\n> ", buffer + 8);
-                parse_and_save_message(buffer);
-            } else if (strncmp(buffer, "USERS:", 6) == 0) {
-                printf("\n%s\n> ", buffer + 6);
+            // Parse different communication types
+            if (strncmp(data_buffer, "REGISTER:", 9) == 0) {
+                // Hub is asking for authentication, send username
+                printf("\n%s\n", data_buffer + 9);
+                send_data(username);
+            } else if (strncmp(data_buffer, "SYSTEM:", 7) == 0) {
+                printf("\n%s\n> ", data_buffer + 7);
+                save_comm_log("NOTIFICATION", "Hub", NULL, data_buffer + 7);
+            } else if (strncmp(data_buffer, "CHAT:", 5) == 0) {
+                printf("\n%s\n> ", data_buffer + 5);
+                parse_and_log_message(data_buffer);
+            } else if (strncmp(data_buffer, "PRIVATE:", 8) == 0) {
+                printf("\n%s\n> ", data_buffer + 8);
+                parse_and_log_message(data_buffer);
+            } else if (strncmp(data_buffer, "USERS:", 6) == 0) {
+                printf("\n%s\n> ", data_buffer + 6);
             } else {
-                printf("\n%s\n> ", buffer);
+                printf("\n%s\n> ", data_buffer);
             }
             fflush(stdout);
         } else if (bytes_received == 0) {
-            printf("\nServer disconnected\n");
-            connected = 0;
+            printf("\nHub disconnected\n");
+            is_connected = 0;
             break;
         } else {
-            printf("\nReceive error: %d\n", WSAGetLastError());
-            connected = 0;
+            printf("\nCommunication error: %d\n", WSAGetLastError());
+            is_connected = 0;
             break;
         }
     }
@@ -248,110 +248,97 @@ unsigned __stdcall receive_thread(void* param) {
     return 0;
 }
 
-void display_help() {
-    printf("\n=== Chat Commands Help ===\n");
-    printf("Available Commands:\n");
-    printf("------------------\n");
-    printf("/help                           - Show this help menu\n");
-    printf("/users                          - Display all online users\n");
-    printf("/private <nickname> <message>   - Send private message to user\n");
-    printf("/history [page]                 - View chat history (optional page number)\n");
-    printf("/next                           - Next page of chat history\n");
-    printf("/prev                           - Previous page of chat history\n");
-    printf("/export                         - Export chat history to file\n");
-    printf("/quit                           - Exit the chat application\n");
-    printf("\nGeneral Usage:\n");
-    printf("- Type any message and press Enter to send to all users\n");
-    printf("- Commands must start with '/' character\n");
-    printf("- Nicknames are case-sensitive\n");
-    printf("\nExamples:\n");
-    printf("  Hello everyone!                - Public message\n");
-    printf("  /private John Hi there!        - Private message to John\n");
-    printf("  /history 2                      - View page 2 of chat history\n");
-    printf("  /export                         - Save chat history to file\n");
-    printf("========================\n\n");
+void show_help_menu() {
+    printf("\n=== Communication Commands ===\n");
+    printf("/help - Show this help menu\n");
+    printf("/exit - Leave the communication hub\n");
+    printf("/users - Show online members\n");
+    printf("/whisper <username> <message> - Send private message\n");
+    printf("/log [page] - View communication history (default: current page)\n");
+    printf("/export - Export communication log to file\n");
+    printf("Type any message to broadcast to all members\n\n");
 }
 
-void cleanup_client() {
-    if (client_socket != INVALID_SOCKET) {
-        closesocket(client_socket);
+void cleanup_connection() {
+    if (hub_connection != INVALID_SOCKET) {
+        closesocket(hub_connection);
     }
     WSACleanup();
 }
 
-void save_chat_record(const char* type, const char* sender, const char* receiver, const char* content) {
-    if (record_count >= MAX_RECORDS) {
-        // Remove oldest record to make space
-        for (int i = 0; i < MAX_RECORDS - 1; i++) {
-            chat_history[i] = chat_history[i + 1];
+void save_comm_log(const char* type, const char* from_user, const char* to_user, const char* content) {
+    if (log_entry_count >= MAX_LOG_ENTRIES) {
+        // Remove oldest entry to make space
+        for (int i = 0; i < MAX_LOG_ENTRIES - 1; i++) {
+            communication_log[i] = communication_log[i + 1];
         }
-        record_count = MAX_RECORDS - 1;
+        log_entry_count = MAX_LOG_ENTRIES - 1;
     }
     
-    ChatRecord* record = &chat_history[record_count];
+    CommLog* entry = &communication_log[log_entry_count];
     
     // Get current time
     time_t now = time(NULL);
     struct tm local_time;
     localtime_s(&local_time, &now);
-    strftime(record->timestamp, sizeof(record->timestamp), "%Y-%m-%d %H:%M:%S", &local_time);
+    strftime(entry->timestamp, sizeof(entry->timestamp), "%Y-%m-%d %H:%M:%S", &local_time);
     
     // Copy data
-    strncpy_s(record->message_type, sizeof(record->message_type), type, _TRUNCATE);
-    strncpy_s(record->sender, sizeof(record->sender), sender ? sender : "", _TRUNCATE);
-    strncpy_s(record->receiver, sizeof(record->receiver), receiver ? receiver : "", _TRUNCATE);
-    strncpy_s(record->content, sizeof(record->content), content, _TRUNCATE);
+    strncpy_s(entry->comm_type, sizeof(entry->comm_type), type, _TRUNCATE);
+    strncpy_s(entry->from_user, sizeof(entry->from_user), from_user ? from_user : "", _TRUNCATE);
+    strncpy_s(entry->to_user, sizeof(entry->to_user), to_user ? to_user : "", _TRUNCATE);
+    strncpy_s(entry->message_content, sizeof(entry->message_content), content, _TRUNCATE);
     
-    record_count++;
+    log_entry_count++;
 }
 
-void display_chat_history(int page) {
-    if (record_count == 0) {
-        printf("\nNo chat records\n\n");
+void display_comm_history(int page) {
+    if (log_entry_count == 0) {
+        printf("\nNo communication log entries\n\n");
         return;
     }
     
-    int start_index = page * RECORDS_PER_PAGE;
-    int end_index = start_index + RECORDS_PER_PAGE;
+    int start_index = page * ENTRIES_PER_PAGE;
+    int end_index = start_index + ENTRIES_PER_PAGE;
     
-    if (start_index >= record_count) {
-        printf("\nNo more records\n\n");
+    if (start_index >= log_entry_count) {
+        printf("\nNo more entries\n\n");
         return;
     }
     
-    if (end_index > record_count) {
-        end_index = record_count;
+    if (end_index > log_entry_count) {
+        end_index = log_entry_count;
     }
     
-    printf("\n=== Chat History (Page %d) ===\n", page + 1);
-    printf("Showing records %d-%d, total %d\n", start_index + 1, end_index, record_count);
+    printf("\n=== Communication History (Page %d) ===\n", page + 1);
+    printf("Showing entries %d-%d, total %d\n", start_index + 1, end_index, log_entry_count);
     printf("---------------------------\n");
     
     for (int i = start_index; i < end_index; i++) {
-        ChatRecord* record = &chat_history[i];
-        printf("[%s] ", record->timestamp);
+        CommLog* entry = &communication_log[i];
+        printf("[%s] ", entry->timestamp);
         
-        if (strcmp(record->message_type, "CHAT") == 0) {
-            printf("<%s> %s\n", record->sender, record->content);
-        } else if (strcmp(record->message_type, "PRIVATE") == 0) {
-            if (strlen(record->receiver) > 0) {
-                printf("[Private] %s -> %s: %s\n", record->sender, record->receiver, record->content);
+        if (strcmp(entry->comm_type, "BROADCAST") == 0) {
+            printf("<%s> %s\n", entry->from_user, entry->message_content);
+        } else if (strcmp(entry->comm_type, "WHISPER") == 0) {
+            if (strlen(entry->to_user) > 0) {
+                printf("[Whisper] %s -> %s: %s\n", entry->from_user, entry->to_user, entry->message_content);
             } else {
-                printf("[Private] %s: %s\n", record->sender, record->content);
+                printf("[Whisper] %s: %s\n", entry->from_user, entry->message_content);
             }
-        } else if (strcmp(record->message_type, "SYSTEM") == 0) {
-            printf("[System] %s\n", record->content);
+        } else if (strcmp(entry->comm_type, "NOTIFICATION") == 0) {
+            printf("[Notification] %s\n", entry->message_content);
         }
     }
     
-    int total_pages = (record_count + RECORDS_PER_PAGE - 1) / RECORDS_PER_PAGE;
+    int total_pages = (log_entry_count + ENTRIES_PER_PAGE - 1) / ENTRIES_PER_PAGE;
     printf("---------------------------\n");
     printf("Page %d/%d | Use /next and /prev to navigate\n\n", page + 1, total_pages);
 }
 
-void export_chat_history() {
-    if (record_count == 0) {
-        printf("\nNo chat records to export\n\n");
+void export_comm_log() {
+    if (log_entry_count == 0) {
+        printf("\nNo communication log entries to export\n\n");
         return;
     }
     
@@ -359,7 +346,7 @@ void export_chat_history() {
     time_t now = time(NULL);
     struct tm local_time;
     localtime_s(&local_time, &now);
-    strftime(filename, sizeof(filename), "chat_history_%Y%m%d_%H%M%S.txt", &local_time);
+    strftime(filename, sizeof(filename), "comm_log_%Y%m%d_%H%M%S.txt", &local_time);
     
     FILE* file;
     if (fopen_s(&file, filename, "w") != 0) {
@@ -367,65 +354,65 @@ void export_chat_history() {
         return;
     }
     
-    fprintf(file, "Chat History Export\n");
+    fprintf(file, "Communication Log Export\n");
     fprintf(file, "Export Time: ");
     char export_time[64];
     strftime(export_time, sizeof(export_time), "%Y-%m-%d %H:%M:%S", &local_time);
     fprintf(file, "%s\n", export_time);
-    fprintf(file, "Total Records: %d\n", record_count);
+    fprintf(file, "Total Entries: %d\n", log_entry_count);
     fprintf(file, "================================\n\n");
     
-    for (int i = 0; i < record_count; i++) {
-        ChatRecord* record = &chat_history[i];
-        fprintf(file, "[%s] ", record->timestamp);
+    for (int i = 0; i < log_entry_count; i++) {
+        CommLog* entry = &communication_log[i];
+        fprintf(file, "[%s] ", entry->timestamp);
         
-        if (strcmp(record->message_type, "CHAT") == 0) {
-            fprintf(file, "<%s> %s\n", record->sender, record->content);
-        } else if (strcmp(record->message_type, "PRIVATE") == 0) {
-            if (strlen(record->receiver) > 0) {
-                fprintf(file, "[Private] %s -> %s: %s\n", record->sender, record->receiver, record->content);
+        if (strcmp(entry->comm_type, "BROADCAST") == 0) {
+            fprintf(file, "<%s> %s\n", entry->from_user, entry->message_content);
+        } else if (strcmp(entry->comm_type, "WHISPER") == 0) {
+            if (strlen(entry->to_user) > 0) {
+                fprintf(file, "[Whisper] %s -> %s: %s\n", entry->from_user, entry->to_user, entry->message_content);
             } else {
-                fprintf(file, "[Private] %s: %s\n", record->sender, record->content);
+                fprintf(file, "[Whisper] %s: %s\n", entry->from_user, entry->message_content);
             }
-        } else if (strcmp(record->message_type, "SYSTEM") == 0) {
-            fprintf(file, "[System] %s\n", record->content);
+        } else if (strcmp(entry->comm_type, "NOTIFICATION") == 0) {
+            fprintf(file, "[Notification] %s\n", entry->message_content);
         }
     }
     
     fclose(file);
-    printf("\nChat history exported to: %s\n\n", filename);
+    printf("\nCommunication log exported to: %s\n\n", filename);
 }
 
-void parse_and_save_message(const char* buffer) {
+void parse_and_log_message(const char* buffer) {
     if (strncmp(buffer, "CHAT:", 5) == 0) {
-        // Parse: "CHAT:[nickname] message"
+        // Parse: "CHAT:[username] message"
         const char* content = buffer + 5;
         if (content[0] == '[') {
             const char* end_bracket = strchr(content, ']');
             if (end_bracket != NULL) {
-                char sender[NICKNAME_SIZE];
+                char sender[USERNAME_SIZE];
                 int sender_len = end_bracket - content - 1;
-                if (sender_len > 0 && sender_len < NICKNAME_SIZE) {
+                if (sender_len > 0 && sender_len < USERNAME_SIZE) {
                     strncpy_s(sender, sizeof(sender), content + 1, sender_len);
                     sender[sender_len] = '\0';
                     const char* message = end_bracket + 2; // Skip "] "
-                    save_chat_record("CHAT", sender, NULL, message);
+                    save_comm_log("BROADCAST", sender, NULL, message);
                 }
             }
         }
     } else if (strncmp(buffer, "PRIVATE:", 8) == 0) {
-        // Parse: "PRIVATE:[from_nickname] message"
+        // Parse: "PRIVATE:[from_username] message"
         const char* content = buffer + 8;
         if (content[0] == '[') {
             const char* end_bracket = strchr(content, ']');
             if (end_bracket != NULL) {
-                char sender[NICKNAME_SIZE];
+                char sender[USERNAME_SIZE];
                 int sender_len = end_bracket - content - 1;
-                if (sender_len > 0 && sender_len < NICKNAME_SIZE) {
+                if (sender_len > 0 && sender_len < USERNAME_SIZE) {
                     strncpy_s(sender, sizeof(sender), content + 1, sender_len);
                     sender[sender_len] = '\0';
                     const char* message = end_bracket + 2; // Skip "] "
-                    save_chat_record("PRIVATE", sender, nickname, message);
+                    save_comm_log("WHISPER", sender, username, message);
                 }
             }
         }
