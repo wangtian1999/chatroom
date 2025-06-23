@@ -45,7 +45,6 @@ int main() {
         return 1;
     }
     
-    printf("Connected to server successfully!\n");
     // Get nickname from user
     printf("Enter your nickname: ");
     fgets(nickname, sizeof(nickname), stdin);
@@ -80,7 +79,7 @@ int main() {
             } else if (strcmp(input, "/help") == 0) {
                 display_help();
             } else if (strcmp(input, "/users") == 0) {
-                send_message("USERLIST");
+                send_message("USERS");
             } else if (strncmp(input, "/private ", 9) == 0) {
                 // Parse private message: /private nickname message
                 char* space_pos = strchr(input + 9, ' ');
@@ -182,8 +181,8 @@ unsigned __stdcall receive_thread(void* param) {
                 printf("\n%s\n> ", buffer + 5);
             } else if (strncmp(buffer, "PRIVATE:", 8) == 0) {
                 printf("\n%s\n> ", buffer + 8);
-            } else if (strncmp(buffer, "USERLIST:", 9) == 0) {
-                printf("\n%s\n> ", buffer + 9);
+            } else if (strncmp(buffer, "USERS:", 6) == 0) {
+                printf("\n%s\n> ", buffer + 6);
             } else {
                 printf("\n%s\n> ", buffer);
             }

@@ -50,7 +50,7 @@ void handle_client_message(int user_index);
 void handle_user_registration(int user_index, const char* nickname);
 void broadcast_user_join(int user_index);
 void broadcast_user_leave(int user_index);
-void send_user_list(int user_index);
+void send_users_list(int user_index);
 void send_message_to_user(int sender_index, const char* receiver_nickname, const char* content);
 void broadcast_message(int sender_index, const char* content);
 void check_keyboard_input();
@@ -160,9 +160,6 @@ void start_listening() {
     struct sockaddr_in client_addr;
     int addr_len = sizeof(client_addr);
     
-    printf("Server is listening for connections...\n");
-    printf("Waiting for users to join the chat...\n\n");
-    
     while (1) {
         // Check for keyboard input
         check_keyboard_input();
@@ -262,9 +259,9 @@ void handle_client_message(int user_index) {
                 // Public chat message format: CHAT:content
                 char* content = buffer + 5;
                 broadcast_message(user_index, content);
-            } else if (strncmp(buffer, "USERLIST", 8) == 0) {
+            } else if (strncmp(buffer, "USERS", 5) == 0) {
                 // Send user list
-                send_user_list(user_index);
+                send_users_list(user_index);
             } else {
                 // Default to public chat
                 broadcast_message(user_index, buffer);
@@ -332,15 +329,14 @@ void handle_user_registration(int user_index, const char* nickname) {
     // Send welcome message
     char welcome_msg[BUFFER_SIZE];
     sprintf_s(welcome_msg, BUFFER_SIZE, 
-              "SYSTEM:Welcome to the chat server, %s! Type 'USERLIST' to see online users.", 
+              "SYSTEM:Welcome to the chat server, %s! Use /users to see online users.", 
               users[user_index].nickname);
     send(users[user_index].socket, welcome_msg, strlen(welcome_msg), 0);
     
     // Broadcast user join to all other users
     broadcast_user_join(user_index);
     
-    // Send current user list to new user
-    send_user_list(user_index);
+
 }
 
 void broadcast_user_join(int user_index) {
@@ -375,9 +371,9 @@ void broadcast_user_leave(int user_index) {
     printf("Broadcasted: %s left the chat\n", users[user_index].nickname);
 }
 
-void send_user_list(int user_index) {
+void send_users_list(int user_index) {
     char user_list[BUFFER_SIZE];
-    strcpy_s(user_list, BUFFER_SIZE, "USERLIST:Online users: ");
+    strcpy_s(user_list, BUFFER_SIZE, "USERS:Online users: ");
     
     int count = 0;
     for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -391,7 +387,7 @@ void send_user_list(int user_index) {
     }
     
     if (count == 0) {
-        strcpy_s(user_list, BUFFER_SIZE, "USERLIST:No users online");
+        strcpy_s(user_list, BUFFER_SIZE, "USERS:No users online");
     }
     
     send(users[user_index].socket, user_list, strlen(user_list), 0);
